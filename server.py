@@ -7,13 +7,58 @@ import ssl
 import os
 from urllib.error import HTTPError
 import urllib.parse
+from datetime import datetime
+
+# Global user storage (in production, use a proper database)
+USERS_FILE = 'users.json'
+
+def load_users():
+    """Load users from JSON file"""
+    try:
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, 'r') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        print(f"Error loading users: {e}")
+        return []
+
+def save_users(users):
+    """Save users to JSON file"""
+    try:
+        with open(USERS_FILE, 'w') as f:
+            json.dump(users, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving users: {e}")
+        return False
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        # Serve the main dashboard file
         if self.path == '/':
             self.path = '/index.html'
+        elif self.path == '/api/users':
+            # Handle GET users request
+            self.handle_get_users()
+            return
         return super().do_GET()
+    
+    def handle_get_users(self):
+        """Handle GET /api/users - return all users"""
+        try:
+            users = load_users()
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(users).encode('utf-8'))
+        except Exception as e:
+            error_response = {'error': f'Error loading users: {str(e)}'}
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(error_response).encode('utf-8'))
     
     def do_POST(self):
         if self.path == '/api/trip-analysis':
@@ -92,15 +137,167 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps(error_response).encode('utf-8'))
+        
+        elif self.path == '/api/users':
+            # Handle POST /api/users - add new user
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            
+            try:
+                request_data = json.loads(post_data.decode('utf-8'))
+                user_id = request_data.get('userid')
+                user_name = request_data.get('name')
+                
+                if not user_id or not user_name:
+                    error_response = {'error': 'Missing userid or name'}
+                    self.send_response(400)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    return
+                
+                # Load existing users
+                users = load_users()
+                
+                # Check if user already exists
+                existing_user = next((u for u in users if u['userid'] == user_id), None)
+                if existing_user:
+                    error_response = {'error': 'User already exists'}
+                    self.send_response(409)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    return
+                
+                # Add new user
+                new_user = {
+                    'userid': user_id,
+                    'name': user_name,
+                    'created_at': datetime.now().isoformat()
+                }
+                users.append(new_user)
+                
+                # Save to file
+                if save_users(users):
+                    print(f"Added new user: {user_name} ({user_id})")
+                    self.send_response(201)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(new_user).encode('utf-8'))
+                else:
+                    error_response = {'error': 'Failed to save user'}
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    
+            except Exception as e:
+                error_response = {'error': f'Error adding user: {str(e)}'}
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(error_response).encode('utf-8'))
+        
+        elif self.path.startswith('/api/users/'):
+            # Handle DELETE /api/users/{userid} - delete user
+            user_id = self.path.split('/')[-1]
+            
+            try:
+                users = load_users()
+                original_count = len(users)
+                users = [u for u in users if u['userid'] != user_id]
+                
+                if len(users) == original_count:
+                    error_response = {'error': 'User not found'}
+                    self.send_response(404)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    return
+                
+                if save_users(users):
+                    print(f"Deleted user: {user_id}")
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'message': 'User deleted successfully'}).encode('utf-8'))
+                else:
+                    error_response = {'error': 'Failed to save changes'}
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    
+            except Exception as e:
+                error_response = {'error': f'Error deleting user: {str(e)}'}
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(error_response).encode('utf-8'))
+        
         else:
             # Handle other requests normally
             super().do_POST()
+    
+    def do_DELETE(self):
+        if self.path.startswith('/api/users/'):
+            # Handle DELETE /api/users/{userid} - delete user
+            user_id = self.path.split('/')[-1]
+            
+            try:
+                users = load_users()
+                original_count = len(users)
+                users = [u for u in users if u['userid'] != user_id]
+                
+                if len(users) == original_count:
+                    error_response = {'error': 'User not found'}
+                    self.send_response(404)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    return
+                
+                if save_users(users):
+                    print(f"Deleted user: {user_id}")
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'message': 'User deleted successfully'}).encode('utf-8'))
+                else:
+                    error_response = {'error': 'Failed to save changes'}
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_response).encode('utf-8'))
+                    
+            except Exception as e:
+                error_response = {'error': f'Error deleting user: {str(e)}'}
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(error_response).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
     
     def do_OPTIONS(self):
         # Handle preflight requests
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
@@ -111,8 +308,14 @@ if __name__ == '__main__':
     # Change to the directory containing index.html
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     
+    # Initialize users file if it doesn't exist
+    if not os.path.exists(USERS_FILE):
+        save_users([])
+        print(f"Created new users file: {USERS_FILE}")
+    
     with socketserver.TCPServer(("", PORT), DashboardHandler) as httpd:
         print(f"Dashboard server running on port {PORT}")
         print(f"Access the dashboard at: http://localhost:{PORT}")
         print(f"Trip analysis API available at: http://localhost:{PORT}/api/trip-analysis")
+        print(f"User management API available at: http://localhost:{PORT}/api/users")
         httpd.serve_forever() 

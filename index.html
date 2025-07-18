@@ -476,7 +476,7 @@
 
     <script>
         // Global variables
-        let users = JSON.parse(localStorage.getItem('metiri_users') || '[]');
+        let users = [];
         let currentPage = 'dashboard';
         let currentUser = null;
         let currentUserDashboard = 'profile'; // 'profile' or 'trip'
@@ -485,7 +485,7 @@
         window.addEventListener('load', function() {
             showPage('dashboard');
             generateFreshToken();
-            renderUsers();
+            loadUsersFromServer();
         });
         
         // Navigation functions
@@ -563,27 +563,79 @@
         }
         
         // User management functions
-        function addUser(userId, userName) {
-            const user = {
-                id: userId,
-                name: userName,
-                addedAt: new Date().toISOString()
-            };
-            
-            users.push(user);
-            localStorage.setItem('metiri_users', JSON.stringify(users));
-            renderUsers();
+        async function loadUsersFromServer() {
+            try {
+                const response = await fetch('/api/users');
+                if (response.ok) {
+                    users = await response.json();
+                    renderUsers();
+                } else {
+                    console.error('Failed to load users from server');
+                    users = [];
+                    renderUsers();
+                }
+            } catch (error) {
+                console.error('Error loading users:', error);
+                users = [];
+                renderUsers();
+            }
         }
         
-        function deleteUser(userId) {
-            users = users.filter(user => user.id !== userId);
-            localStorage.setItem('metiri_users', JSON.stringify(users));
-            renderUsers();
+        async function addUser(userId, userName) {
+            try {
+                const response = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        userid: userId,
+                        name: userName
+                    })
+                });
+                
+                if (response.ok) {
+                    const newUser = await response.json();
+                    users.push(newUser);
+                    renderUsers();
+                    return true;
+                } else {
+                    const errorData = await response.json();
+                    alert(`Failed to add user: ${errorData.error}`);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error adding user:', error);
+                alert(`Error adding user: ${error.message}`);
+                return false;
+            }
+        }
+        
+        async function deleteUser(userId) {
+            try {
+                const response = await fetch(`/api/users/${userId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    users = users.filter(user => user.userid !== userId);
+                    renderUsers();
+                    return true;
+                } else {
+                    const errorData = await response.json();
+                    alert(`Failed to delete user: ${errorData.error}`);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error deleting user:', error);
+                alert(`Error deleting user: ${error.message}`);
+                return false;
+            }
         }
         
         // User Details functions
         async function openUserDetails(userId, dashboardType = 'profile') {
-            const user = users.find(u => u.id === userId);
+            const user = users.find(u => u.userid === userId);
             if (!user) {
                 alert('User not found');
                 return;
@@ -595,7 +647,7 @@
             // Update user details display
             document.getElementById('userDetailsAvatar').textContent = user.name.charAt(0).toUpperCase();
             document.getElementById('userDetailsName').textContent = user.name;
-            document.getElementById('userDetailsId').textContent = user.id;
+            document.getElementById('userDetailsId').textContent = user.userid;
             
             // Update toggle buttons
             document.getElementById('profileToggle').classList.remove('active');
@@ -649,7 +701,7 @@
                             'Accept': 'application/json'
                         },
                         body: JSON.stringify({
-                            userid: currentUser.id,
+                            userid: currentUser.userid,
                             expiration_minutes: '60',
                             back_url: '23951f8c-116e-461e-a676-304cd47dcb6b',
                             units: 'km'
@@ -674,7 +726,7 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            userid: currentUser.id
+                            userid: currentUser.userid
                         })
                     });
                     
@@ -765,15 +817,15 @@
                 <div class="user-card">
                     <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
                     <div class="user-name">${user.name}</div>
-                    <div class="user-id">${user.id}</div>
+                    <div class="user-id">${user.userid}</div>
                     <div class="user-actions">
-                        <button class="btn btn-primary" onclick="openUserDetails('${user.id}', 'profile')">
+                        <button class="btn btn-primary" onclick="openUserDetails('${user.userid}', 'profile')">
                             View Profile
                         </button>
-                        <button class="btn btn-primary" onclick="openUserDetails('${user.id}', 'trip')">
+                        <button class="btn btn-primary" onclick="openUserDetails('${user.userid}', 'trip')">
                             Trip Analysis
                         </button>
-                        <button class="btn btn-secondary" onclick="deleteUser('${user.id}')">
+                        <button class="btn btn-secondary" onclick="deleteUser('${user.userid}')">
                             Delete
                         </button>
                     </div>
@@ -782,7 +834,7 @@
         }
         
         // Form handling
-        document.getElementById('addUserForm').addEventListener('submit', function(e) {
+        document.getElementById('addUserForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const userId = document.getElementById('newUserId').value.trim();
@@ -801,19 +853,21 @@
             }
             
             // Check if user already exists
-            if (users.some(user => user.id === userId)) {
+            if (users.some(user => user.userid === userId)) {
                 alert('User with this ID already exists');
                 return;
             }
             
-            addUser(userId, userName);
+            const success = await addUser(userId, userName);
             
-            // Clear form
-            document.getElementById('newUserId').value = '';
-            document.getElementById('newUserName').value = '';
-            
-            // Show success message
-            alert('User added successfully!');
+            if (success) {
+                // Clear form
+                document.getElementById('newUserId').value = '';
+                document.getElementById('newUserName').value = '';
+                
+                // Show success message
+                alert('User added successfully!');
+            }
         });
         
         // Utility functions
