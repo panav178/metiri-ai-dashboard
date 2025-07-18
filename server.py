@@ -9,15 +9,30 @@ from urllib.error import HTTPError
 import urllib.parse
 from datetime import datetime
 
-# Global user storage (in production, use a proper database)
-USERS_FILE = 'users.json'
+# Global user storage - use Render's persistent disk if available
+if os.environ.get('RENDER'):
+    # On Render, try multiple locations for persistence
+    possible_paths = [
+        '/opt/render/project/src/users.json',
+        '/tmp/users.json',
+        'users.json'
+    ]
+    USERS_FILE = possible_paths[0]  # Try the persistent disk first
+else:
+    # Local development
+    USERS_FILE = 'users.json'
 
 def load_users():
     """Load users from JSON file"""
     try:
+        print(f"Loading users from: {USERS_FILE}")
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'r') as f:
-                return json.load(f)
+                users = json.load(f)
+                print(f"Loaded {len(users)} users from file")
+                return users
+        else:
+            print(f"Users file does not exist: {USERS_FILE}")
         return []
     except Exception as e:
         print(f"Error loading users: {e}")
@@ -26,8 +41,12 @@ def load_users():
 def save_users(users):
     """Save users to JSON file"""
     try:
+        print(f"Saving {len(users)} users to: {USERS_FILE}")
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
         with open(USERS_FILE, 'w') as f:
             json.dump(users, f, indent=2)
+        print(f"Successfully saved users to file")
         return True
     except Exception as e:
         print(f"Error saving users: {e}")
