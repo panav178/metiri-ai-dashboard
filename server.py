@@ -13,44 +13,101 @@ from datetime import datetime
 if os.environ.get('RENDER'):
     # On Render, try multiple locations for persistence
     possible_paths = [
+        '/tmp/users.json',  # Try /tmp first (usually writable)
         '/opt/render/project/src/users.json',
-        '/tmp/users.json',
         'users.json'
     ]
-    USERS_FILE = possible_paths[0]  # Try the persistent disk first
+    USERS_FILE = possible_paths[0]  # Try /tmp first
 else:
     # Local development
     USERS_FILE = 'users.json'
 
 def load_users():
     """Load users from JSON file"""
-    try:
-        print(f"Loading users from: {USERS_FILE}")
-        if os.path.exists(USERS_FILE):
-            with open(USERS_FILE, 'r') as f:
-                users = json.load(f)
-                print(f"Loaded {len(users)} users from file")
-                return users
-        else:
-            print(f"Users file does not exist: {USERS_FILE}")
+    if os.environ.get('RENDER'):
+        # On Render, try multiple locations
+        possible_paths = [
+            '/tmp/users.json',
+            '/opt/render/project/src/users.json',
+            'users.json'
+        ]
+        
+        for path in possible_paths:
+            try:
+                print(f"Trying to load users from: {path}")
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        users = json.load(f)
+                        print(f"Loaded {len(users)} users from: {path}")
+                        # Update the global USERS_FILE to use this working path
+                        global USERS_FILE
+                        USERS_FILE = path
+                        return users
+                else:
+                    print(f"Users file does not exist: {path}")
+            except Exception as e:
+                print(f"Failed to load from {path}: {e}")
+                continue
+        
+        print("No users file found in any location")
         return []
-    except Exception as e:
-        print(f"Error loading users: {e}")
-        return []
+    else:
+        # Local development
+        try:
+            print(f"Loading users from: {USERS_FILE}")
+            if os.path.exists(USERS_FILE):
+                with open(USERS_FILE, 'r') as f:
+                    users = json.load(f)
+                    print(f"Loaded {len(users)} users from file")
+                    return users
+            else:
+                print(f"Users file does not exist: {USERS_FILE}")
+            return []
+        except Exception as e:
+            print(f"Error loading users: {e}")
+            return []
 
 def save_users(users):
     """Save users to JSON file"""
-    try:
-        print(f"Saving {len(users)} users to: {USERS_FILE}")
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-        with open(USERS_FILE, 'w') as f:
-            json.dump(users, f, indent=2)
-        print(f"Successfully saved users to file")
-        return True
-    except Exception as e:
-        print(f"Error saving users: {e}")
+    if os.environ.get('RENDER'):
+        # On Render, try multiple locations
+        possible_paths = [
+            '/tmp/users.json',
+            '/opt/render/project/src/users.json',
+            'users.json'
+        ]
+        
+        for path in possible_paths:
+            try:
+                print(f"Trying to save {len(users)} users to: {path}")
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, 'w') as f:
+                    json.dump(users, f, indent=2)
+                print(f"Successfully saved users to: {path}")
+                # Update the global USERS_FILE to use this working path
+                global USERS_FILE
+                USERS_FILE = path
+                return True
+            except Exception as e:
+                print(f"Failed to save to {path}: {e}")
+                continue
+        
+        print("Failed to save users to any location")
         return False
+    else:
+        # Local development
+        try:
+            print(f"Saving {len(users)} users to: {USERS_FILE}")
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+            with open(USERS_FILE, 'w') as f:
+                json.dump(users, f, indent=2)
+            print(f"Successfully saved users to file")
+            return True
+        except Exception as e:
+            print(f"Error saving users: {e}")
+            return False
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
